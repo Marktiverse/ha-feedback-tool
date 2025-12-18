@@ -1,245 +1,183 @@
-function buildPdfTemplate(result) {
-  const b = result.batch_summary || {};
-  const gaps = (result.common_gaps_top5 || []).slice(0, 5);
-  const cases = result.cases || [];
-  const msg3 = (result.supervisor_group_message_3lines || []).slice(0, 3);
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>督導戰情室｜服務日誌分析與成交優化系統</title>
 
-  const now = new Date();
-  const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
-  const chip = (text) => `
-    <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:#EEF2FF;color:#4338CA;font-weight:800;font-size:11px;">
-      ${escapeHtml(text)}
-    </span>
-  `;
+  <!-- FontAwesome -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
 
-  const card = (title, value, sub) => `
-    <div class="rounded-3xl border border-slate-100 shadow-sm p-6 bg-white">
-      <div class="text-slate-400 text-[10px] font-black uppercase mb-1">${escapeHtml(title)}</div>
-      <div class="text-3xl font-black text-slate-900">${escapeHtml(value ?? "unknown")}</div>
-      <div class="text-xs text-slate-400 mt-1">${escapeHtml(sub || "")}</div>
+  <!-- PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+    body { font-family: 'Noto Sans TC', sans-serif; }
+    .chip { font-size: 11px; font-weight: 900; }
+    .avoid-break { break-inside: avoid; page-break-inside: avoid; }
+    .page-break { page-break-before: always; break-before: page; }
+  </style>
+</head>
+
+<body class="bg-slate-50 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div>
+      <h1 class="text-3xl font-black text-slate-800 flex items-center gap-3">
+        <i class="fas fa-headset text-purple-600"></i>
+        督導戰情室
+      </h1>
+      <p class="text-slate-500 font-medium">
+        服務日誌自動判讀｜成交風險診斷｜一鍵分析報告 & PDF
+      </p>
     </div>
-  `;
 
-  const sectionTitle = (icon, title) => `
-    <div class="flex items-center gap-2 mb-4">
-      <div class="w-9 h-9 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-500">
-        <i class="${icon}"></i>
-      </div>
-      <div class="text-xl font-black text-slate-900">${escapeHtml(title)}</div>
+    <div class="flex items-center bg-white shadow-sm border rounded-full px-4 py-2 gap-3 w-full md:w-auto">
+      <i class="fas fa-key text-slate-400 text-sm"></i>
+      <input id="apiKey" type="password" placeholder="輸入 Gemini API Key"
+        class="text-sm outline-none w-full md:w-72">
     </div>
-  `;
+  </header>
 
-  const riskList = (title, icon, items, tone) => `
-    <div class="rounded-3xl border border-slate-100 bg-white p-6">
-      <div class="flex items-center gap-2 mb-3">
-        <i class="${icon} ${tone}"></i>
-        <div class="font-black text-slate-900">${escapeHtml(title)}</div>
-      </div>
-      <ul class="space-y-2">
-        ${(items || []).slice(0, 8).map(x => `
-          <li class="text-sm text-slate-700 flex gap-2">
-            <span class="font-black ${tone}">•</span><span>${escapeHtml(x)}</span>
-          </li>
-        `).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
-      </ul>
+  <!-- Input -->
+  <div class="bg-white rounded-3xl shadow-xl border border-slate-100 p-6 mb-8">
+    <label class="block text-sm font-black text-slate-700 mb-3">
+      貼上門市服務 / 外撥工作日誌（不用整理）
+    </label>
+
+    <textarea id="logInput"
+      class="w-full h-[300px] p-5 bg-slate-50 rounded-2xl focus:ring-2 focus:ring-purple-500 text-sm"
+      placeholder="直接貼整天的工作日誌即可，系統會自動判讀…"></textarea>
+
+    <div class="mt-4 flex gap-3 flex-wrap">
+      <button onclick="analyzeLog()"
+        class="bg-purple-600 hover:bg-purple-700 text-white font-black px-6 py-3 rounded-2xl flex items-center gap-2">
+        <i class="fas fa-wand-magic-sparkles"></i> 一鍵分析
+      </button>
+
+      <button onclick="generateReport()"
+        class="bg-slate-900 hover:bg-slate-800 text-white font-black px-6 py-3 rounded-2xl flex items-center gap-2">
+        <i class="fas fa-file-lines"></i> 生成報告
+      </button>
+
+      <button onclick="copyReport()"
+        class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black px-6 py-3 rounded-2xl flex items-center gap-2">
+        <i class="fas fa-copy"></i> 複製報告
+      </button>
+
+      <button onclick="downloadReportPdf()"
+        class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-black px-6 py-3 rounded-2xl flex items-center gap-2">
+        <i class="fas fa-file-pdf"></i> 下載 PDF
+      </button>
     </div>
-  `;
+  </div>
 
-  const gapCards = gaps.map((g, i) => `
-    <div class="rounded-3xl border border-slate-100 bg-white p-6 avoid-break">
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-2xl bg-slate-900 text-white font-black flex items-center justify-center">${i+1}</div>
-          <div>
-            <div class="font-black text-slate-900">${escapeHtml(g.gap || "unknown")}</div>
-            <div class="text-xs text-slate-500 mt-1">${escapeHtml(g.why_it_loses_deals || "")}</div>
-          </div>
-        </div>
-        ${chip("漏單點")}
-      </div>
+  <!-- Results -->
+  <div id="analysisResult" class="space-y-6"></div>
 
-      <div class="mt-4 grid grid-cols-1 gap-3">
-        <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-          <div class="text-[10px] uppercase font-black text-slate-400">修正動作</div>
-          <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(g.fix_action || "unknown")}</div>
-        </div>
-        <div class="rounded-2xl bg-slate-900 p-4">
-          <div class="text-[10px] uppercase font-black text-white/60">督導一句話</div>
-          <div class="text-sm font-black text-white mt-1">"${escapeHtml(g.coach_script_one_liner || "unknown")}"</div>
-        </div>
-      </div>
-    </div>
-  `).join('');
+</div>
 
-  const caseCards = cases.map((c, idx) => {
-    const opp = c.opportunity_grade || {};
-    const dm = c.decision_maker || {};
-    const disc = c.disc_profile || {};
-    const tools = c.validation_tools || {};
-    const plan = c.followup_plan || {};
-    const barriers = (c.barriers || []).slice(0, 3);
+<!-- PDF Hidden -->
+<div id="pdfRoot" class="fixed -left-[99999px] top-0 w-[794px] bg-white">
+  <div id="pdfContent" class="p-10"></div>
+</div>
 
-    return `
-      <div class="rounded-3xl border border-slate-100 bg-white p-6 avoid-break">
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <div class="text-lg font-black text-slate-900">${escapeHtml(c.case_id || `Case ${idx+1}`)}</div>
-            <div class="text-xs text-slate-500 mt-1">
-              類型：${escapeHtml(c.case_type || "unknown")}｜
-              訂閱：${escapeHtml(c.subscription_status || "unknown")}｜
-              階段：${escapeHtml(c.stage || "unknown")}｜
-              商機：${escapeHtml(opp.grade || "unknown")}
-            </div>
-          </div>
-          ${chip(`下一步：${opp.next_best_step || "unknown"}`)}
-        </div>
+<script>
+let lastResult = null;
+let lastReport = "";
 
-        <div class="mt-4 grid grid-cols-2 gap-3">
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">決策者</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(dm.who || "unknown")}（在場：${escapeHtml(dm.present || "unknown")}）</div>
-            <div class="text-xs text-slate-500 mt-1">${escapeHtml(dm.risk_note || "")}</div>
-          </div>
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">DISC</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">用戶 ${escapeHtml(disc.user_disc || "unknown")}｜照護者 ${escapeHtml(disc.caregiver_disc || "unknown")}</div>
-            <div class="text-xs text-slate-500 mt-1">${escapeHtml(disc.inference_basis || "")}</div>
-          </div>
-        </div>
-
-        <div class="mt-3 rounded-2xl bg-slate-900 p-4">
-          <div class="text-[10px] uppercase font-black text-white/60">建議話術</div>
-          <div class="text-sm font-black text-white mt-1">"${escapeHtml(disc.script || "unknown")}"</div>
-        </div>
-
-        <div class="mt-4 grid grid-cols-3 gap-3">
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">REM</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.rem?.status || "unknown")}</div>
-          </div>
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">語音/字詞</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.speech_test?.status || "unknown")}</div>
-          </div>
-          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">情境驗證</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.situational_validation?.status || "unknown")}</div>
-          </div>
-        </div>
-
-        <div class="mt-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-          <div class="text-[10px] uppercase font-black text-slate-400">主要卡關（最多3項）</div>
-          <div class="mt-2 space-y-1">
-            ${barriers.map(b => `<div class="text-sm text-slate-800">• ${escapeHtml(b.type || "未知")}：${escapeHtml(b.note || "")}</div>`).join('') || `<div class="text-sm text-slate-400">（無）</div>`}
-          </div>
-        </div>
-
-        <div class="mt-4 grid grid-cols-3 gap-3">
-          <div class="rounded-2xl bg-white border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">72小時內</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_72h?.action || "unknown")}</div>
-            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_72h?.success_metric || "unknown")}</div>
-          </div>
-          <div class="rounded-2xl bg-white border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">7天內</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_7d?.action || "unknown")}</div>
-            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_7d?.success_metric || "unknown")}</div>
-          </div>
-          <div class="rounded-2xl bg-white border border-slate-100 p-4">
-            <div class="text-[10px] uppercase font-black text-slate-400">30天內</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_30d?.action || "unknown")}</div>
-            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_30d?.success_metric || "unknown")}</div>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  return `
-    <div class="text-slate-900">
-      <div class="flex items-start justify-between">
-        <div>
-          <div class="text-2xl font-black">督導戰情室｜服務日誌分析報告</div>
-          <div class="text-sm text-slate-500 mt-1">產出時間：${escapeHtml(ts)}</div>
-        </div>
-        <div class="text-right">
-          <div class="text-xs text-slate-400 font-black uppercase">Clinico / Hearing Care</div>
-          <div class="text-xs text-slate-400">（內部使用）</div>
-        </div>
-      </div>
-
-      <div class="mt-6 grid grid-cols-3 gap-4">
-        ${card("整體強度", b.overall_strength ?? "unknown", "0-100（越高越穩）")}
-        ${card("邀約力", b.invite_strength ?? "unknown", "外撥→進店/下一步")}
-        ${card("成交力", b.conversion_strength ?? "unknown", "試聽→承諾→收單")}
-      </div>
-
-      <div class="mt-6 grid grid-cols-2 gap-4">
-        ${riskList("本批主要風險", "fas fa-triangle-exclamation", b.top_risks || [], "text-red-500")}
-        ${riskList("本批做得好的地方", "fas fa-bolt", b.top_wins || [], "text-green-600")}
-      </div>
-
-      <div class="mt-8">
-        ${sectionTitle("fas fa-magnifying-glass-chart", "最常見漏單缺口 Top 5")}
-        <div class="grid grid-cols-1 gap-4">
-          ${gapCards || `<div class="text-sm text-slate-400">（無）</div>`}
-        </div>
-      </div>
-
-      <div class="mt-10 page-break">
-        ${sectionTitle("fas fa-users-gear", "個案拆解與下一步")}
-        <div class="grid grid-cols-1 gap-4">
-          ${caseCards || `<div class="text-sm text-slate-400">（無）</div>`}
-        </div>
-      </div>
-
-      <div class="mt-10 rounded-3xl bg-slate-900 text-white p-6 avoid-break">
-        <div class="text-lg font-black">督導三句話（可直接貼群組）</div>
-        <div class="mt-3 space-y-2">
-          ${msg3.map((m, i) => `<div class="text-sm font-bold">${i+1}. ${escapeHtml(m)}</div>`).join('') || `<div class="text-sm text-white/70">（無）</div>`}
-        </div>
-      </div>
-
-      <div class="mt-6 text-xs text-slate-400">
-        ※ 本報告由系統依據日誌內容自動判讀，未提及資訊以 unknown 呈現；請依實際門市情境補充校正。
-      </div>
-    </div>
-  `;
-}
-
-async function downloadReportPdf() {
-  if (!lastResult) {
-    alert("尚未完成分析，請先執行「一鍵判讀」。");
+/* ========= Gemini 分析 ========= */
+async function analyzeLog() {
+  const apiKey = document.getElementById("apiKey").value.trim();
+  const log = document.getElementById("logInput").value.trim();
+  if (!apiKey || !log) {
+    alert("請輸入 API Key 並貼上日誌");
     return;
   }
 
-  // 1) 準備 PDF 內容
-  const pdfContent = document.getElementById("pdfContent");
-  pdfContent.innerHTML = buildPdfTemplate(lastResult);
+  const systemPrompt = `
+你是資深聽力門市區域督導。
+請自動判讀以下工作日誌，輸出 JSON，包含：
+- batch_summary（整體/邀約/成交）
+- common_gaps_top5
+- cases（商機分級、DISC、驗證工具、追蹤）
+- supervisor_group_message_3lines
+嚴格 JSON，沒有資訊請用 unknown。
+`;
 
-  // 2) 追加 PDF 專用 CSS（避免卡片被切半）
-  const style = document.createElement("style");
-  style.innerHTML = `
-    .avoid-break { page-break-inside: avoid; break-inside: avoid; }
-    .page-break { page-break-before: always; break-before: page; }
+  const res = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=" + apiKey,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts: [{ text: log }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.4 }
+      })
+    }
+  );
+
+  const data = await res.json();
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  lastResult = JSON.parse(raw);
+
+  document.getElementById("analysisResult").innerHTML = `
+    <div class="bg-white rounded-3xl shadow p-6">
+      <div class="text-xl font-black text-slate-800 mb-2">分析完成</div>
+      <pre class="text-xs bg-slate-100 p-4 rounded-xl overflow-auto">${raw}</pre>
+    </div>
   `;
-  pdfContent.prepend(style);
-
-  // 3) 下載
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-
-  const element = document.getElementById("pdfRoot");
-
-  const opt = {
-    margin:       10,                 // mm
-    filename:     `服務日誌分析報告_${stamp}.pdf`,
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak:    { mode: ['css', 'legacy'] }
-  };
-
-  await html2pdf().set(opt).from(element).save();
 }
+
+/* ========= 文字報告 ========= */
+function generateReport() {
+  if (!lastResult) { alert("尚未分析"); return; }
+
+  const b = lastResult.batch_summary || {};
+  let t = `【督導分析報告】\n\n`;
+  t += `整體強度：${b.overall_strength}\n邀約力：${b.invite_strength}\n成交力：${b.conversion_strength}\n\n`;
+
+  (lastResult.common_gaps_top5 || []).forEach((g,i)=>{
+    t += `${i+1}. ${g.gap}\n→ 修正：${g.fix_action}\n\n`;
+  });
+
+  lastReport = t;
+  alert("報告已生成");
+}
+
+function copyReport() {
+  if (!lastReport) { alert("尚未生成報告"); return; }
+  navigator.clipboard.writeText(lastReport);
+  alert("已複製");
+}
+
+/* ========= PDF ========= */
+function downloadReportPdf() {
+  if (!lastResult) { alert("尚未分析"); return; }
+
+  const pdf = document.getElementById("pdfContent");
+  pdf.innerHTML = `
+    <h1 class="text-2xl font-black mb-4">督導戰情室｜分析報告</h1>
+    <pre class="text-sm">${lastReport}</pre>
+  `;
+
+  html2pdf().from(document.getElementById("pdfRoot")).set({
+    margin: 10,
+    filename: "服務日誌分析報告.pdf",
+    html2canvas: { scale: 2 },
+    jsPDF: { unit: "mm", format: "a4" }
+  }).save();
+}
+</script>
+
+</body>
+</html>
+
