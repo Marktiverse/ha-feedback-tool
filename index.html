@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -15,6 +14,7 @@
     .stat-card:hover { transform: translateY(-4px); }
     .chip { font-size: 10px; font-weight: 900; letter-spacing: .04em; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .btn { transition: all .15s ease; }
   </style>
 </head>
 
@@ -28,7 +28,7 @@
           <i class="fas fa-headset text-blue-600"></i>
           督導戰情室：服務日誌自動判讀
         </h1>
-        <p class="text-slate-500 font-medium">只貼日誌 → 自動辨識：訂閱轉買斷 / 初次試聽 / 暫借追蹤｜商機分級｜DISC｜專業驗證｜追蹤計畫</p>
+        <p class="text-slate-500 font-medium">只貼日誌 → 自動辨識：訂閱轉買斷 / 初次試聽 / 暫借追蹤｜商機分級｜DISC｜專業驗證｜追蹤計畫｜一鍵報告</p>
       </div>
 
       <div class="flex items-center bg-white shadow-sm border rounded-full px-4 py-2 gap-3 w-full md:w-auto">
@@ -64,14 +64,14 @@
             <button
               onclick="analyzeLog()"
               id="analyzeBtn"
-              class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-3"
+              class="btn flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-3"
             >
               <i class="fas fa-wand-magic-sparkles"></i> 一鍵判讀＆產出督導回饋
             </button>
 
             <button
               onclick="loadDemo()"
-              class="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black py-4 px-4 rounded-2xl shadow-sm transition-all flex items-center justify-center gap-2"
+              class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black py-4 px-4 rounded-2xl shadow-sm flex items-center justify-center gap-2"
               title="載入範例日誌"
             >
               <i class="fas fa-flask"></i>
@@ -101,6 +101,50 @@
             </div>
           </div>
         </div>
+
+        <!-- 一鍵報告：側欄 -->
+        <div id="reportPanel" class="hidden bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <i class="fas fa-file-lines text-purple-600"></i>
+              <div class="font-black text-slate-800">分析報告（文字版）</div>
+            </div>
+            <button
+              onclick="copyReport()"
+              id="copyReportBtn"
+              class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-4 py-2 rounded-full"
+            >
+              <i class="fas fa-copy mr-2"></i> 複製整份
+            </button>
+          </div>
+
+          <p class="text-xs text-slate-400 mt-2">
+            這份是給同仁看的「可直接貼群組/私訊」版本（不含原始 JSON）。
+          </p>
+
+          <textarea
+            id="reportText"
+            class="mt-4 w-full h-[260px] p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs leading-relaxed mono"
+            readonly
+            placeholder="完成分析後，這裡會自動生成報告..."
+          ></textarea>
+
+          <div class="mt-4 grid grid-cols-2 gap-3">
+            <button
+              onclick="downloadReportTxt()"
+              class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"
+            >
+              <i class="fas fa-download"></i> 下載 .txt
+            </button>
+            <button
+              onclick="toggleReportModal(true)"
+              class="btn bg-purple-600 hover:bg-purple-700 text-white font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"
+            >
+              <i class="fas fa-up-right-from-square"></i> 放大檢視
+            </button>
+          </div>
+        </div>
+
       </div>
 
       <!-- Results -->
@@ -115,12 +159,65 @@
           </p>
         </div>
 
+        <!-- 報告工具列（結果區） -->
+        <div id="reportToolbar" class="hidden mb-6">
+          <div class="bg-white rounded-3xl shadow-lg border border-slate-100 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                <i class="fas fa-file-circle-check"></i>
+              </div>
+              <div>
+                <div class="font-black text-slate-800">一鍵產出分析報告</div>
+                <div class="text-xs text-slate-500">自動整理成同仁看得懂、可直接複製的文字版</div>
+              </div>
+            </div>
+            <div class="flex gap-3 flex-wrap">
+              <button onclick="generateReport()" class="btn bg-purple-600 hover:bg-purple-700 text-white font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
+                <i class="fas fa-wand-sparkles"></i> 生成報告
+              </button>
+              <button onclick="copyReport()" class="btn bg-slate-900 hover:bg-slate-800 text-white font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
+                <i class="fas fa-copy"></i> 複製報告
+              </button>
+              <button onclick="downloadReportTxt()" class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
+                <i class="fas fa-download"></i> 下載TXT
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div id="analysisResult" class="hidden space-y-6"></div>
       </div>
     </div>
   </div>
 
+  <!-- Report Modal -->
+  <div id="reportModal" class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+      <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-file-lines text-purple-600"></i>
+          <div class="font-black text-slate-800">分析報告（放大檢視）</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="copyReport()" class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-4 py-2 rounded-full">
+            <i class="fas fa-copy mr-2"></i> 複製
+          </button>
+          <button onclick="toggleReportModal(false)" class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-black px-4 py-2 rounded-full">
+            <i class="fas fa-xmark mr-2"></i> 關閉
+          </button>
+        </div>
+      </div>
+      <div class="p-5">
+        <textarea id="reportTextModal" class="w-full h-[60vh] p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs leading-relaxed mono" readonly></textarea>
+      </div>
+    </div>
+  </div>
+
   <script>
+    // ====== Global state ======
+    let lastResult = null;     // store parsed JSON
+    let lastReport = "";       // store report text
+
     // ====== Demo ======
     function loadDemo() {
       const demo = `
@@ -151,7 +248,14 @@
       resultDiv.classList.add('hidden');
       resultDiv.innerHTML = '';
 
-      // === System Prompt: 自動抽取 + 不確定就 unknown + 附證據句 ===
+      // reset report
+      lastResult = null;
+      lastReport = "";
+      document.getElementById('reportText').value = "";
+      document.getElementById('reportTextModal').value = "";
+      document.getElementById('reportPanel').classList.add('hidden');
+      document.getElementById('reportToolbar').classList.add('hidden');
+
       const systemPrompt = `
 你是一位資深「聽力門市區域督導」與「成交教練」。
 使用者只會貼上一段工作日誌，你必須自動判讀、拆分成多個案件（若可辨識），並輸出「可直接用來回饋聽力師、提升成交機率」的結構化結果。
@@ -260,29 +364,28 @@ ${logInput}
         );
 
         const data = await response.json();
-
-        // Gemini 可能回傳 text 或 inline json string
         const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!raw) {
-          console.error(data);
-          throw new Error("模型未回傳可解析內容");
-        }
+        if (!raw) throw new Error("模型未回傳可解析內容");
 
         let result;
         try {
           result = JSON.parse(raw);
         } catch (e) {
-          // 若模型包了多餘字元，做一次保守修復
           const first = raw.indexOf('{');
           const last = raw.lastIndexOf('}');
-          if (first >= 0 && last >= 0 && last > first) {
-            result = JSON.parse(raw.slice(first, last + 1));
-          } else {
-            throw e;
-          }
+          if (first >= 0 && last >= 0 && last > first) result = JSON.parse(raw.slice(first, last + 1));
+          else throw e;
         }
 
+        lastResult = result;
         renderResult(result);
+
+        // show report controls
+        document.getElementById('reportToolbar').classList.remove('hidden');
+        document.getElementById('reportPanel').classList.remove('hidden');
+
+        // auto-generate once for convenience
+        generateReport();
 
       } catch (error) {
         console.error(error);
@@ -292,6 +395,139 @@ ${logInput}
         status.classList.add('hidden');
         document.getElementById('analysisResult').classList.remove('hidden');
       }
+    }
+
+    // ====== Report Generator ======
+    function generateReport() {
+      if (!lastResult) { alert('尚未完成分析，請先執行「一鍵判讀」。'); return; }
+
+      const r = lastResult;
+      const batch = r.batch_summary || {};
+      const gaps = (r.common_gaps_top5 || []).slice(0,5);
+      const cases = r.cases || [];
+      const msg3 = (r.supervisor_group_message_3lines || []).slice(0,3);
+
+      const now = new Date();
+      const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+      let text = "";
+      text += `【服務日誌分析報告｜督導回饋】\n`;
+      text += `產出時間：${ts}\n`;
+      text += `----------------------------------------\n`;
+      text += `【批次總結】\n`;
+      text += `整體強度：${batch.overall_strength ?? "unknown"} /100｜邀約力：${batch.invite_strength ?? "unknown"} /100｜成交力：${batch.conversion_strength ?? "unknown"} /100\n`;
+      text += `主要風險：${(batch.top_risks || []).slice(0,6).join('、') || "（無）"}\n`;
+      text += `做得好的地方：${(batch.top_wins || []).slice(0,6).join('、') || "（無）"}\n`;
+      text += `----------------------------------------\n`;
+
+      text += `【最常見漏單缺口 Top 5】\n`;
+      gaps.forEach((g, i) => {
+        text += `${i+1}. ${g.gap || "unknown"}\n`;
+        if (g.why_it_loses_deals) text += `   - 為何漏單：${g.why_it_loses_deals}\n`;
+        if (g.fix_action) text += `   - 修正動作：${g.fix_action}\n`;
+        if (g.coach_script_one_liner) text += `   - 督導一句話：${g.coach_script_one_liner}\n`;
+      });
+      if (!gaps.length) text += `（無）\n`;
+
+      text += `----------------------------------------\n`;
+      text += `【個案拆解與下一步（可直接照做）】\n`;
+
+      cases.forEach((c, idx) => {
+        const dm = c.decision_maker || {};
+        const opp = c.opportunity_grade || {};
+        const disc = c.disc_profile || {};
+        const tools = c.validation_tools || {};
+        const plan = c.followup_plan || {};
+        const barriers = (c.barriers || []).slice(0,4);
+
+        text += `\n(${idx+1}) 個案：${c.case_id || `Case ${idx+1}`}\n`;
+        text += `- 類型：${c.case_type || "unknown"}｜訂閱：${c.subscription_status || "unknown"}｜階段：${c.stage || "unknown"}｜商機：${opp.grade || "unknown"}\n`;
+        text += `- 商機理由：${opp.reasoning || "unknown"}\n`;
+        text += `- 下一步最優先：${opp.next_best_step || "unknown"}\n`;
+        text += `- 決策者：${dm.who || "unknown"}｜在場：${dm.present || "unknown"}｜風險：${dm.risk_note || "unknown"}\n`;
+
+        if (barriers.length) {
+          text += `- 主要卡關：\n`;
+          barriers.forEach(b => {
+            text += `  • ${b.type || "未知"}：${b.note || ""}\n`;
+          });
+        } else {
+          text += `- 主要卡關：（無/不明）\n`;
+        }
+
+        text += `- DISC判讀：用戶 ${disc.user_disc || "unknown"}｜照護者 ${disc.caregiver_disc || "unknown"}\n`;
+        if (disc.script) text += `- 建議應對話術：${disc.script}\n`;
+
+        text += `- 專業驗證工具：REM ${tools.rem?.status || "unknown"}｜語音/字詞 ${tools.speech_test?.status || "unknown"}｜情境驗證 ${tools.situational_validation?.status || "unknown"}\n`;
+        if (tools.rem?.next_action || tools.speech_test?.next_action || tools.situational_validation?.next_action) {
+          text += `  下一步建議：\n`;
+          if (tools.rem?.next_action) text += `  • REM：${tools.rem.next_action}\n`;
+          if (tools.speech_test?.next_action) text += `  • 語音/字詞：${tools.speech_test.next_action}\n`;
+          if (tools.situational_validation?.next_action) text += `  • 情境驗證：${tools.situational_validation.next_action}\n`;
+        }
+
+        text += `- 追蹤計畫：\n`;
+        text += `  72小時內｜行動：${plan.within_72h?.action || "unknown"}｜對象：${plan.within_72h?.target || "unknown"}｜目的：${plan.within_72h?.purpose || "unknown"}｜指標：${plan.within_72h?.success_metric || "unknown"}\n`;
+        text += `  7天內｜行動：${plan.within_7d?.action || "unknown"}｜對象：${plan.within_7d?.target || "unknown"}｜目的：${plan.within_7d?.purpose || "unknown"}｜指標：${plan.within_7d?.success_metric || "unknown"}\n`;
+        text += `  30天內｜行動：${plan.within_30d?.action || "unknown"}｜對象：${plan.within_30d?.target || "unknown"}｜目的：${plan.within_30d?.purpose || "unknown"}｜指標：${plan.within_30d?.success_metric || "unknown"}\n`;
+
+        if ((c.supervisor_notes || []).length) {
+          text += `- 督導點評：\n`;
+          (c.supervisor_notes || []).slice(0,4).forEach(s => text += `  • ${s}\n`);
+        }
+      });
+
+      text += `\n----------------------------------------\n`;
+      text += `【督導三句話（可直接貼群組）】\n`;
+      if (msg3.length) msg3.forEach((m, i) => text += `${i+1}. ${m}\n`);
+      else text += `（無）\n`;
+
+      lastReport = text.trim();
+      document.getElementById('reportText').value = lastReport;
+      document.getElementById('reportTextModal').value = lastReport;
+    }
+
+    function copyReport() {
+      const t = document.getElementById('reportText').value || lastReport;
+      if (!t) { alert('尚未生成報告，請先按「生成報告」。'); return; }
+      copyTextToClipboard(t);
+      alert('已複製整份分析報告！');
+    }
+
+    function downloadReportTxt() {
+      const t = document.getElementById('reportText').value || lastReport;
+      if (!t) { alert('尚未生成報告，請先按「生成報告」。'); return; }
+      const blob = new Blob([t], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+      a.href = url;
+      a.download = `服務日誌分析報告_${stamp}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function toggleReportModal(show) {
+      const modal = document.getElementById('reportModal');
+      if (show) {
+        if (!lastReport) generateReport();
+        document.getElementById('reportTextModal').value = lastReport || '';
+        modal.classList.remove('hidden');
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    function copyTextToClipboard(text) {
+      const el = document.createElement('textarea');
+      el.value = text || '';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
     }
 
     // ====== UI helpers ======
@@ -453,7 +689,7 @@ ${logInput}
                   </div>
                 </div>
               </div>
-            `).join('') || `<div class="text-sm text-slate-400">（模型未能彙整缺口，請確認日誌內容是否足夠）</div>`}
+            `).join('') || `<div class="text-sm text-slate-400">（無）</div>`}
           </div>
         </div>
 
@@ -479,8 +715,8 @@ ${logInput}
           <div class="flex justify-between items-center mb-6">
             <h3 class="text-white font-black text-xl">督導三句話（可直接貼群組）</h3>
             <button
-              onclick="copyFeedback(${JSON.stringify((msg3 || []).join('\\n'))})"
-              class="bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full transition-all"
+              onclick="copyTextToClipboard(${JSON.stringify((msg3 || []).join('\\n'))})"
+              class="btn bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full"
             >
               <i class="fas fa-copy mr-2"></i> 複製
             </button>
@@ -513,7 +749,6 @@ ${logInput}
       const tools = c?.validation_tools || {};
       const barriers = c?.barriers || [];
       const plan = c?.followup_plan || {};
-
       const title = c?.case_id || `Case ${idx+1}`;
 
       return `
@@ -542,7 +777,6 @@ ${logInput}
             </div>
           </div>
 
-          <!-- Decision maker -->
           <div class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-white rounded-2xl border border-slate-100 p-5">
               <div class="flex items-center justify-between gap-3">
@@ -560,7 +794,6 @@ ${logInput}
               ${renderQuotes(dm.evidence_quotes)}
             </div>
 
-            <!-- Barriers -->
             <div class="bg-white rounded-2xl border border-slate-100 p-5">
               <div class="font-black text-slate-800 flex items-center gap-2">
                 <i class="fas fa-ban text-red-500"></i> 主要卡關
@@ -579,7 +812,6 @@ ${logInput}
             </div>
           </div>
 
-          <!-- DISC -->
           <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div class="font-black text-slate-800 flex items-center gap-2">
@@ -617,7 +849,6 @@ ${logInput}
             ${renderQuotes(disc.evidence_quotes)}
           </div>
 
-          <!-- Tools -->
           <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
             <div class="font-black text-slate-800 flex items-center gap-2 mb-3">
               <i class="fas fa-microscope text-blue-500"></i> 專業驗證工具檢核
@@ -630,15 +861,14 @@ ${logInput}
             </div>
           </div>
 
-          <!-- Follow-up plan -->
           <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
             <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
               <div class="font-black text-slate-800 flex items-center gap-2">
                 <i class="fas fa-route text-green-500"></i> 後續追蹤具體計畫
               </div>
               <button
-                onclick="copyFeedback(${JSON.stringify(buildCaseFollowupText(title, plan))})"
-                class="bg-slate-900 hover:bg-slate-800 text-white text-xs px-4 py-2 rounded-full transition-all"
+                onclick="copyTextToClipboard(${JSON.stringify(buildCaseFollowupText(title, plan))})"
+                class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs px-4 py-2 rounded-full"
               >
                 <i class="fas fa-copy mr-2"></i> 複製追蹤計畫
               </button>
@@ -651,15 +881,14 @@ ${logInput}
             </div>
           </div>
 
-          <!-- Supervisor notes -->
           <div class="mt-5 bg-slate-900 rounded-2xl p-5">
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div class="font-black text-white flex items-center gap-2">
                 <i class="fas fa-dumbbell text-white/70"></i> 督導點評（可直接回饋）
               </div>
               <button
-                onclick="copyFeedback(${JSON.stringify((c?.supervisor_notes || []).join('\\n'))})"
-                class="bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full transition-all"
+                onclick="copyTextToClipboard(${JSON.stringify((c?.supervisor_notes || []).join('\\n'))})"
+                class="btn bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full"
               >
                 <i class="fas fa-copy mr-2"></i> 複製
               </button>
@@ -739,7 +968,8 @@ ${logInput}
       ].join('\n');
     }
 
-    function copyFeedback(text) {
+    // ====== Utility ======
+    function copyTextToClipboard(text) {
       const el = document.createElement('textarea');
       el.value = text || '';
       document.body.appendChild(el);
@@ -751,4 +981,3 @@ ${logInput}
   </script>
 </body>
 </html>
-```
