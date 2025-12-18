@@ -1,983 +1,245 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>督導戰情室：服務日誌自動判讀回饋系統（Gemini）</title>
+function buildPdfTemplate(result) {
+  const b = result.batch_summary || {};
+  const gaps = (result.common_gaps_top5 || []).slice(0, 5);
+  const cases = result.cases || [];
+  const msg3 = (result.supervisor_group_message_3lines || []).slice(0, 3);
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-    body { font-family: 'Noto Sans TC', sans-serif; }
-    .stat-card { transition: transform .2s; }
-    .stat-card:hover { transform: translateY(-4px); }
-    .chip { font-size: 10px; font-weight: 900; letter-spacing: .04em; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .btn { transition: all .15s ease; }
-  </style>
-</head>
+  const now = new Date();
+  const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
 
-<body class="bg-slate-50 min-h-screen">
-  <div class="max-w-7xl mx-auto px-4 py-8">
+  const chip = (text) => `
+    <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:#EEF2FF;color:#4338CA;font-weight:800;font-size:11px;">
+      ${escapeHtml(text)}
+    </span>
+  `;
 
-    <!-- Header -->
-    <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-      <div>
-        <h1 class="text-3xl font-black text-slate-800 flex items-center gap-3">
-          <i class="fas fa-headset text-blue-600"></i>
-          督導戰情室：服務日誌自動判讀
-        </h1>
-        <p class="text-slate-500 font-medium">只貼日誌 → 自動辨識：訂閱轉買斷 / 初次試聽 / 暫借追蹤｜商機分級｜DISC｜專業驗證｜追蹤計畫｜一鍵報告</p>
+  const card = (title, value, sub) => `
+    <div class="rounded-3xl border border-slate-100 shadow-sm p-6 bg-white">
+      <div class="text-slate-400 text-[10px] font-black uppercase mb-1">${escapeHtml(title)}</div>
+      <div class="text-3xl font-black text-slate-900">${escapeHtml(value ?? "unknown")}</div>
+      <div class="text-xs text-slate-400 mt-1">${escapeHtml(sub || "")}</div>
+    </div>
+  `;
+
+  const sectionTitle = (icon, title) => `
+    <div class="flex items-center gap-2 mb-4">
+      <div class="w-9 h-9 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-500">
+        <i class="${icon}"></i>
+      </div>
+      <div class="text-xl font-black text-slate-900">${escapeHtml(title)}</div>
+    </div>
+  `;
+
+  const riskList = (title, icon, items, tone) => `
+    <div class="rounded-3xl border border-slate-100 bg-white p-6">
+      <div class="flex items-center gap-2 mb-3">
+        <i class="${icon} ${tone}"></i>
+        <div class="font-black text-slate-900">${escapeHtml(title)}</div>
+      </div>
+      <ul class="space-y-2">
+        ${(items || []).slice(0, 8).map(x => `
+          <li class="text-sm text-slate-700 flex gap-2">
+            <span class="font-black ${tone}">•</span><span>${escapeHtml(x)}</span>
+          </li>
+        `).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
+      </ul>
+    </div>
+  `;
+
+  const gapCards = gaps.map((g, i) => `
+    <div class="rounded-3xl border border-slate-100 bg-white p-6 avoid-break">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-2xl bg-slate-900 text-white font-black flex items-center justify-center">${i+1}</div>
+          <div>
+            <div class="font-black text-slate-900">${escapeHtml(g.gap || "unknown")}</div>
+            <div class="text-xs text-slate-500 mt-1">${escapeHtml(g.why_it_loses_deals || "")}</div>
+          </div>
+        </div>
+        ${chip("漏單點")}
       </div>
 
-      <div class="flex items-center bg-white shadow-sm border rounded-full px-4 py-2 gap-3 w-full md:w-auto">
-        <i class="fas fa-key text-slate-400 text-sm"></i>
-        <input
-          type="password"
-          id="apiKey"
-          placeholder="輸入 Gemini API Key"
-          class="text-sm outline-none w-full md:w-72"
-        />
-      </div>
-    </header>
-
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      <!-- Input -->
-      <div class="lg:col-span-4 space-y-6">
-        <div class="bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
-          <label class="block text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-            <i class="fas fa-clipboard-list text-blue-500"></i> 貼上服務/外撥工作日誌（不用填欄位）
-          </label>
-
-          <textarea
-            id="logInput"
-            class="w-full h-[560px] p-5 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 text-sm leading-relaxed"
-            placeholder="請直接貼上日誌，例如：
-- 個案A：暫借/試聽/異議/家屬互動/預計追蹤
-- 個案B：訂閱用戶轉買斷討論/價格/決策者不在
-- 當日外撥摘要：通數、邀約、未成交原因
-（系統會自動判讀，不需要你整理成固定格式）"
-          ></textarea>
-
-          <div class="mt-4 flex gap-3">
-            <button
-              onclick="analyzeLog()"
-              id="analyzeBtn"
-              class="btn flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-3"
-            >
-              <i class="fas fa-wand-magic-sparkles"></i> 一鍵判讀＆產出督導回饋
-            </button>
-
-            <button
-              onclick="loadDemo()"
-              class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black py-4 px-4 rounded-2xl shadow-sm flex items-center justify-center gap-2"
-              title="載入範例日誌"
-            >
-              <i class="fas fa-flask"></i>
-            </button>
-          </div>
-
-          <p class="mt-3 text-xs text-slate-400">
-            建議：日誌越貼近「實際對話/決策者/驗證結果/下一步安排」，判讀越準。
-          </p>
+      <div class="mt-4 grid grid-cols-1 gap-3">
+        <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+          <div class="text-[10px] uppercase font-black text-slate-400">修正動作</div>
+          <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(g.fix_action || "unknown")}</div>
         </div>
-
-        <div id="statusInfo" class="hidden bg-blue-50 border border-blue-100 p-4 rounded-2xl text-blue-700 text-sm font-medium flex items-center gap-3">
-          <i class="fas fa-circle-notch fa-spin"></i>
-          正在自動辨識案件類型、商機分級、DISC、驗證工具使用與追蹤計畫...
+        <div class="rounded-2xl bg-slate-900 p-4">
+          <div class="text-[10px] uppercase font-black text-white/60">督導一句話</div>
+          <div class="text-sm font-black text-white mt-1">"${escapeHtml(g.coach_script_one_liner || "unknown")}"</div>
         </div>
-
-        <div class="bg-white rounded-3xl shadow-sm border border-slate-100 p-5">
-          <div class="flex items-start gap-3">
-            <div class="w-9 h-9 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
-              <i class="fas fa-shield-heart"></i>
-            </div>
-            <div>
-              <div class="text-sm font-black text-slate-700">安全提醒</div>
-              <p class="text-xs text-slate-500 mt-1">
-                避免貼入可直接辨識個資（身分證、完整電話、完整住址）。姓名可用縮寫或代號。
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- 一鍵報告：側欄 -->
-        <div id="reportPanel" class="hidden bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <i class="fas fa-file-lines text-purple-600"></i>
-              <div class="font-black text-slate-800">分析報告（文字版）</div>
-            </div>
-            <button
-              onclick="copyReport()"
-              id="copyReportBtn"
-              class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-4 py-2 rounded-full"
-            >
-              <i class="fas fa-copy mr-2"></i> 複製整份
-            </button>
-          </div>
-
-          <p class="text-xs text-slate-400 mt-2">
-            這份是給同仁看的「可直接貼群組/私訊」版本（不含原始 JSON）。
-          </p>
-
-          <textarea
-            id="reportText"
-            class="mt-4 w-full h-[260px] p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs leading-relaxed mono"
-            readonly
-            placeholder="完成分析後，這裡會自動生成報告..."
-          ></textarea>
-
-          <div class="mt-4 grid grid-cols-2 gap-3">
-            <button
-              onclick="downloadReportTxt()"
-              class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"
-            >
-              <i class="fas fa-download"></i> 下載 .txt
-            </button>
-            <button
-              onclick="toggleReportModal(true)"
-              class="btn bg-purple-600 hover:bg-purple-700 text-white font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"
-            >
-              <i class="fas fa-up-right-from-square"></i> 放大檢視
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Results -->
-      <div class="lg:col-span-8">
-        <div id="welcomeScreen" class="h-full min-h-[600px] flex flex-col items-center justify-center border-4 border-dashed border-slate-200 rounded-3xl p-12 text-center">
-          <div class="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-300">
-            <i class="fas fa-file-waveform text-3xl"></i>
-          </div>
-          <h3 class="text-slate-500 font-black text-lg">等你貼上日誌</h3>
-          <p class="text-slate-400 text-sm max-w-md mt-2">
-            我會自動判讀每筆個案是「訂閱轉買斷 / 初次試聽 / 暫借追蹤 / 交貨後追蹤」，並給你：商機分級、DISC應對、專業驗證檢核、最常見缺口與具體追蹤計畫。
-          </p>
-        </div>
-
-        <!-- 報告工具列（結果區） -->
-        <div id="reportToolbar" class="hidden mb-6">
-          <div class="bg-white rounded-3xl shadow-lg border border-slate-100 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                <i class="fas fa-file-circle-check"></i>
-              </div>
-              <div>
-                <div class="font-black text-slate-800">一鍵產出分析報告</div>
-                <div class="text-xs text-slate-500">自動整理成同仁看得懂、可直接複製的文字版</div>
-              </div>
-            </div>
-            <div class="flex gap-3 flex-wrap">
-              <button onclick="generateReport()" class="btn bg-purple-600 hover:bg-purple-700 text-white font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
-                <i class="fas fa-wand-sparkles"></i> 生成報告
-              </button>
-              <button onclick="copyReport()" class="btn bg-slate-900 hover:bg-slate-800 text-white font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
-                <i class="fas fa-copy"></i> 複製報告
-              </button>
-              <button onclick="downloadReportTxt()" class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-black px-5 py-3 rounded-2xl text-sm flex items-center gap-2">
-                <i class="fas fa-download"></i> 下載TXT
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div id="analysisResult" class="hidden space-y-6"></div>
       </div>
     </div>
-  </div>
+  `).join('');
 
-  <!-- Report Modal -->
-  <div id="reportModal" class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
-      <div class="p-5 border-b border-slate-100 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <i class="fas fa-file-lines text-purple-600"></i>
-          <div class="font-black text-slate-800">分析報告（放大檢視）</div>
+  const caseCards = cases.map((c, idx) => {
+    const opp = c.opportunity_grade || {};
+    const dm = c.decision_maker || {};
+    const disc = c.disc_profile || {};
+    const tools = c.validation_tools || {};
+    const plan = c.followup_plan || {};
+    const barriers = (c.barriers || []).slice(0, 3);
+
+    return `
+      <div class="rounded-3xl border border-slate-100 bg-white p-6 avoid-break">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-lg font-black text-slate-900">${escapeHtml(c.case_id || `Case ${idx+1}`)}</div>
+            <div class="text-xs text-slate-500 mt-1">
+              類型：${escapeHtml(c.case_type || "unknown")}｜
+              訂閱：${escapeHtml(c.subscription_status || "unknown")}｜
+              階段：${escapeHtml(c.stage || "unknown")}｜
+              商機：${escapeHtml(opp.grade || "unknown")}
+            </div>
+          </div>
+          ${chip(`下一步：${opp.next_best_step || "unknown"}`)}
         </div>
-        <div class="flex items-center gap-2">
-          <button onclick="copyReport()" class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-4 py-2 rounded-full">
-            <i class="fas fa-copy mr-2"></i> 複製
-          </button>
-          <button onclick="toggleReportModal(false)" class="btn bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-black px-4 py-2 rounded-full">
-            <i class="fas fa-xmark mr-2"></i> 關閉
-          </button>
+
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">決策者</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(dm.who || "unknown")}（在場：${escapeHtml(dm.present || "unknown")}）</div>
+            <div class="text-xs text-slate-500 mt-1">${escapeHtml(dm.risk_note || "")}</div>
+          </div>
+          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">DISC</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">用戶 ${escapeHtml(disc.user_disc || "unknown")}｜照護者 ${escapeHtml(disc.caregiver_disc || "unknown")}</div>
+            <div class="text-xs text-slate-500 mt-1">${escapeHtml(disc.inference_basis || "")}</div>
+          </div>
+        </div>
+
+        <div class="mt-3 rounded-2xl bg-slate-900 p-4">
+          <div class="text-[10px] uppercase font-black text-white/60">建議話術</div>
+          <div class="text-sm font-black text-white mt-1">"${escapeHtml(disc.script || "unknown")}"</div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-3">
+          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">REM</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.rem?.status || "unknown")}</div>
+          </div>
+          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">語音/字詞</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.speech_test?.status || "unknown")}</div>
+          </div>
+          <div class="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">情境驗證</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(tools.situational_validation?.status || "unknown")}</div>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
+          <div class="text-[10px] uppercase font-black text-slate-400">主要卡關（最多3項）</div>
+          <div class="mt-2 space-y-1">
+            ${barriers.map(b => `<div class="text-sm text-slate-800">• ${escapeHtml(b.type || "未知")}：${escapeHtml(b.note || "")}</div>`).join('') || `<div class="text-sm text-slate-400">（無）</div>`}
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-3">
+          <div class="rounded-2xl bg-white border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">72小時內</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_72h?.action || "unknown")}</div>
+            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_72h?.success_metric || "unknown")}</div>
+          </div>
+          <div class="rounded-2xl bg-white border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">7天內</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_7d?.action || "unknown")}</div>
+            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_7d?.success_metric || "unknown")}</div>
+          </div>
+          <div class="rounded-2xl bg-white border border-slate-100 p-4">
+            <div class="text-[10px] uppercase font-black text-slate-400">30天內</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeHtml(plan.within_30d?.action || "unknown")}</div>
+            <div class="text-xs text-slate-500 mt-1">指標：${escapeHtml(plan.within_30d?.success_metric || "unknown")}</div>
+          </div>
         </div>
       </div>
-      <div class="p-5">
-        <textarea id="reportTextModal" class="w-full h-[60vh] p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs leading-relaxed mono" readonly></textarea>
+    `;
+  }).join('');
+
+  return `
+    <div class="text-slate-900">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="text-2xl font-black">督導戰情室｜服務日誌分析報告</div>
+          <div class="text-sm text-slate-500 mt-1">產出時間：${escapeHtml(ts)}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-400 font-black uppercase">Clinico / Hearing Care</div>
+          <div class="text-xs text-slate-400">（內部使用）</div>
+        </div>
+      </div>
+
+      <div class="mt-6 grid grid-cols-3 gap-4">
+        ${card("整體強度", b.overall_strength ?? "unknown", "0-100（越高越穩）")}
+        ${card("邀約力", b.invite_strength ?? "unknown", "外撥→進店/下一步")}
+        ${card("成交力", b.conversion_strength ?? "unknown", "試聽→承諾→收單")}
+      </div>
+
+      <div class="mt-6 grid grid-cols-2 gap-4">
+        ${riskList("本批主要風險", "fas fa-triangle-exclamation", b.top_risks || [], "text-red-500")}
+        ${riskList("本批做得好的地方", "fas fa-bolt", b.top_wins || [], "text-green-600")}
+      </div>
+
+      <div class="mt-8">
+        ${sectionTitle("fas fa-magnifying-glass-chart", "最常見漏單缺口 Top 5")}
+        <div class="grid grid-cols-1 gap-4">
+          ${gapCards || `<div class="text-sm text-slate-400">（無）</div>`}
+        </div>
+      </div>
+
+      <div class="mt-10 page-break">
+        ${sectionTitle("fas fa-users-gear", "個案拆解與下一步")}
+        <div class="grid grid-cols-1 gap-4">
+          ${caseCards || `<div class="text-sm text-slate-400">（無）</div>`}
+        </div>
+      </div>
+
+      <div class="mt-10 rounded-3xl bg-slate-900 text-white p-6 avoid-break">
+        <div class="text-lg font-black">督導三句話（可直接貼群組）</div>
+        <div class="mt-3 space-y-2">
+          ${msg3.map((m, i) => `<div class="text-sm font-bold">${i+1}. ${escapeHtml(m)}</div>`).join('') || `<div class="text-sm text-white/70">（無）</div>`}
+        </div>
+      </div>
+
+      <div class="mt-6 text-xs text-slate-400">
+        ※ 本報告由系統依據日誌內容自動判讀，未提及資訊以 unknown 呈現；請依實際門市情境補充校正。
       </div>
     </div>
-  </div>
-
-  <script>
-    // ====== Global state ======
-    let lastResult = null;     // store parsed JSON
-    let lastReport = "";       // store report text
-
-    // ====== Demo ======
-    function loadDemo() {
-      const demo = `
-【個案A】王○○，75y，兒子陪同但媳婦（主要決策者）不在。主訴聚餐聽不清楚、電視要開很大。現場試聽覺得有差，但說要回去討論。報價後覺得太貴，提到朋友說好市多便宜很多。未做REM，只有主觀感受「還可以」。預計下週致電關心。
-【個案B】陳○○，訂閱已滿6期，配戴順利，近期說想等新機。本人可接受，但太太很在意費用與保固。今天電話溝通，對方想再想想。
-【個案C】林○○，82y，疑似認知退化，女兒照顧壓力大。WRS偏低，說明後家屬擔心「買了也沒用」。今日做遮口雙字詞：裸耳40%→配戴72%。安排暫借7天，但沒有給作業，僅說「戴戴看」。
-【當日外撥摘要】外撥28通，成功邀約3位進店；未成交多因：決策者不在、價格比較他牌、暫借後回訪弱。
-      `.trim();
-      document.getElementById('logInput').value = demo;
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    // ====== Core ======
-    async function analyzeLog() {
-      const apiKey = document.getElementById('apiKey').value.trim();
-      const logInput = document.getElementById('logInput').value.trim();
-      const btn = document.getElementById('analyzeBtn');
-      const status = document.getElementById('statusInfo');
-      const resultDiv = document.getElementById('analysisResult');
-      const welcome = document.getElementById('welcomeScreen');
-
-      if (!apiKey) { alert('請先輸入 Gemini API Key！'); return; }
-      if (!logInput) { alert('請貼上日誌內容。'); return; }
-
-      btn.disabled = true;
-      status.classList.remove('hidden');
-      welcome.classList.add('hidden');
-      resultDiv.classList.add('hidden');
-      resultDiv.innerHTML = '';
-
-      // reset report
-      lastResult = null;
-      lastReport = "";
-      document.getElementById('reportText').value = "";
-      document.getElementById('reportTextModal').value = "";
-      document.getElementById('reportPanel').classList.add('hidden');
-      document.getElementById('reportToolbar').classList.add('hidden');
-
-      const systemPrompt = `
-你是一位資深「聽力門市區域督導」與「成交教練」。
-使用者只會貼上一段工作日誌，你必須自動判讀、拆分成多個案件（若可辨識），並輸出「可直接用來回饋聽力師、提升成交機率」的結構化結果。
-
-【硬規則（必遵守）】
-1) 只能依據日誌內容推論；沒有寫到就輸出 "unknown"；不可腦補。
-2) 每個推論都要附最多3句 evidence_quotes（原文短句即可，不要超過25字/句）。
-3) 需自動判斷案件類型：subscription_buyout（訂閱轉買斷）/ first_trial（初次試聽）/ loan_trial（暫借驗證）/ post_delivery_followup（交貨後追蹤）/ unknown
-4) 需自動判斷 subscription_status：subscribed / not_subscribed / unknown
-5) 需輸出：用戶商機分級（A/B/C/D）+ 理由（可執行，不空泛）
-6) 需輸出：用戶DISC、照護者DISC（若沒有照護者資訊就 unknown），並提供「應對進退建議」。
-7) 需檢視專業驗證工具是否使用：REM、字詞表/語音測試、情境驗證（每項：used / not_used / unknown + 建議下一步）
-8) 需提供後續追蹤計畫：72小時內、7天內、30天內（每項都要包含「行動、對象、目的、成功指標」）
-9) 需從整批日誌中彙整：最常見的服務缺口 Top 5（對應你觀察到的漏單點），每個缺口都要有「證據句 + 一句可直接講的督導話術 + 修正動作」。
-10) 最後給「督導總結」：3句話（可直接貼到群組），語氣務實、支持但不討好。
-
-【輸出格式：嚴格 JSON，禁止額外文字】
-{
-  "batch_summary": {
-    "overall_strength": "0-100",
-    "invite_strength": "0-100",
-    "conversion_strength": "0-100",
-    "top_risks": ["..."],
-    "top_wins": ["..."]
-  },
-  "common_gaps_top5": [
-    {
-      "gap": "",
-      "why_it_loses_deals": "",
-      "evidence_quotes": ["", ""],
-      "fix_action": "",
-      "coach_script_one_liner": ""
-    }
-  ],
-  "cases": [
-    {
-      "case_id": "可用代號或姓名縮寫",
-      "case_type": "subscription_buyout|first_trial|loan_trial|post_delivery_followup|unknown",
-      "subscription_status": "subscribed|not_subscribed|unknown",
-      "stage": "初談/試聽中/已暫借/待決策/交貨後/unknown",
-      "decision_maker": {
-        "who": "本人/兒子/女兒/配偶/unknown",
-        "present": "yes|no|unknown",
-        "risk_note": "",
-        "evidence_quotes": ["", ""]
-      },
-      "opportunity_grade": {
-        "grade": "A|B|C|D",
-        "reasoning": "",
-        "next_best_step": "",
-        "evidence_quotes": ["", ""]
-      },
-      "disc_profile": {
-        "user_disc": "D|I|S|C|unknown",
-        "caregiver_disc": "D|I|S|C|unknown",
-        "inference_basis": "用一句話說明推測依據",
-        "do": ["你要做什麼（2-3點）"],
-        "dont": ["你不要做什麼（1-2點）"],
-        "script": "一段可直接使用的應對話術（50-120字）",
-        "evidence_quotes": ["", ""]
-      },
-      "validation_tools": {
-        "rem": { "status": "used|not_used|unknown", "note": "", "next_action": "" },
-        "speech_test": { "status": "used|not_used|unknown", "note": "", "next_action": "" },
-        "situational_validation": { "status": "used|not_used|unknown", "note": "", "next_action": "" }
-      },
-      "barriers": [
-        { "type": "價格/決策者不在/覺得差不多/面子/照護壓力/未知", "note": "", "evidence_quotes": [""] }
-      ],
-      "followup_plan": {
-        "within_72h": { "action": "", "target": "", "purpose": "", "success_metric": "" },
-        "within_7d": { "action": "", "target": "", "purpose": "", "success_metric": "" },
-        "within_30d": { "action": "", "target": "", "purpose": "", "success_metric": "" }
-      },
-      "supervisor_notes": ["督導點評1", "督導點評2"]
-    }
-  ],
-  "supervisor_group_message_3lines": ["", "", ""]
+  `;
 }
-      `.trim();
 
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${encodeURIComponent(apiKey)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{
-                  text: `
-你收到一段門市工作日誌，請依 system 指示做自動判讀與結構化輸出。
-【工作日誌開始】
-${logInput}
-【工作日誌結束】
-                  `.trim()
-                }]
-              }],
-              systemInstruction: { parts: [{ text: systemPrompt }] },
-              generationConfig: {
-                responseMimeType: "application/json",
-                temperature: 0.4
-              }
-            })
-          }
-        );
-
-        const data = await response.json();
-        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!raw) throw new Error("模型未回傳可解析內容");
-
-        let result;
-        try {
-          result = JSON.parse(raw);
-        } catch (e) {
-          const first = raw.indexOf('{');
-          const last = raw.lastIndexOf('}');
-          if (first >= 0 && last >= 0 && last > first) result = JSON.parse(raw.slice(first, last + 1));
-          else throw e;
-        }
-
-        lastResult = result;
-        renderResult(result);
-
-        // show report controls
-        document.getElementById('reportToolbar').classList.remove('hidden');
-        document.getElementById('reportPanel').classList.remove('hidden');
-
-        // auto-generate once for convenience
-        generateReport();
-
-      } catch (error) {
-        console.error(error);
-        alert('分析失敗：請檢查網路、API Key、或稍後再試。');
-      } finally {
-        btn.disabled = false;
-        status.classList.add('hidden');
-        document.getElementById('analysisResult').classList.remove('hidden');
-      }
-    }
-
-    // ====== Report Generator ======
-    function generateReport() {
-      if (!lastResult) { alert('尚未完成分析，請先執行「一鍵判讀」。'); return; }
-
-      const r = lastResult;
-      const batch = r.batch_summary || {};
-      const gaps = (r.common_gaps_top5 || []).slice(0,5);
-      const cases = r.cases || [];
-      const msg3 = (r.supervisor_group_message_3lines || []).slice(0,3);
-
-      const now = new Date();
-      const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-
-      let text = "";
-      text += `【服務日誌分析報告｜督導回饋】\n`;
-      text += `產出時間：${ts}\n`;
-      text += `----------------------------------------\n`;
-      text += `【批次總結】\n`;
-      text += `整體強度：${batch.overall_strength ?? "unknown"} /100｜邀約力：${batch.invite_strength ?? "unknown"} /100｜成交力：${batch.conversion_strength ?? "unknown"} /100\n`;
-      text += `主要風險：${(batch.top_risks || []).slice(0,6).join('、') || "（無）"}\n`;
-      text += `做得好的地方：${(batch.top_wins || []).slice(0,6).join('、') || "（無）"}\n`;
-      text += `----------------------------------------\n`;
-
-      text += `【最常見漏單缺口 Top 5】\n`;
-      gaps.forEach((g, i) => {
-        text += `${i+1}. ${g.gap || "unknown"}\n`;
-        if (g.why_it_loses_deals) text += `   - 為何漏單：${g.why_it_loses_deals}\n`;
-        if (g.fix_action) text += `   - 修正動作：${g.fix_action}\n`;
-        if (g.coach_script_one_liner) text += `   - 督導一句話：${g.coach_script_one_liner}\n`;
-      });
-      if (!gaps.length) text += `（無）\n`;
-
-      text += `----------------------------------------\n`;
-      text += `【個案拆解與下一步（可直接照做）】\n`;
-
-      cases.forEach((c, idx) => {
-        const dm = c.decision_maker || {};
-        const opp = c.opportunity_grade || {};
-        const disc = c.disc_profile || {};
-        const tools = c.validation_tools || {};
-        const plan = c.followup_plan || {};
-        const barriers = (c.barriers || []).slice(0,4);
-
-        text += `\n(${idx+1}) 個案：${c.case_id || `Case ${idx+1}`}\n`;
-        text += `- 類型：${c.case_type || "unknown"}｜訂閱：${c.subscription_status || "unknown"}｜階段：${c.stage || "unknown"}｜商機：${opp.grade || "unknown"}\n`;
-        text += `- 商機理由：${opp.reasoning || "unknown"}\n`;
-        text += `- 下一步最優先：${opp.next_best_step || "unknown"}\n`;
-        text += `- 決策者：${dm.who || "unknown"}｜在場：${dm.present || "unknown"}｜風險：${dm.risk_note || "unknown"}\n`;
-
-        if (barriers.length) {
-          text += `- 主要卡關：\n`;
-          barriers.forEach(b => {
-            text += `  • ${b.type || "未知"}：${b.note || ""}\n`;
-          });
-        } else {
-          text += `- 主要卡關：（無/不明）\n`;
-        }
-
-        text += `- DISC判讀：用戶 ${disc.user_disc || "unknown"}｜照護者 ${disc.caregiver_disc || "unknown"}\n`;
-        if (disc.script) text += `- 建議應對話術：${disc.script}\n`;
-
-        text += `- 專業驗證工具：REM ${tools.rem?.status || "unknown"}｜語音/字詞 ${tools.speech_test?.status || "unknown"}｜情境驗證 ${tools.situational_validation?.status || "unknown"}\n`;
-        if (tools.rem?.next_action || tools.speech_test?.next_action || tools.situational_validation?.next_action) {
-          text += `  下一步建議：\n`;
-          if (tools.rem?.next_action) text += `  • REM：${tools.rem.next_action}\n`;
-          if (tools.speech_test?.next_action) text += `  • 語音/字詞：${tools.speech_test.next_action}\n`;
-          if (tools.situational_validation?.next_action) text += `  • 情境驗證：${tools.situational_validation.next_action}\n`;
-        }
-
-        text += `- 追蹤計畫：\n`;
-        text += `  72小時內｜行動：${plan.within_72h?.action || "unknown"}｜對象：${plan.within_72h?.target || "unknown"}｜目的：${plan.within_72h?.purpose || "unknown"}｜指標：${plan.within_72h?.success_metric || "unknown"}\n`;
-        text += `  7天內｜行動：${plan.within_7d?.action || "unknown"}｜對象：${plan.within_7d?.target || "unknown"}｜目的：${plan.within_7d?.purpose || "unknown"}｜指標：${plan.within_7d?.success_metric || "unknown"}\n`;
-        text += `  30天內｜行動：${plan.within_30d?.action || "unknown"}｜對象：${plan.within_30d?.target || "unknown"}｜目的：${plan.within_30d?.purpose || "unknown"}｜指標：${plan.within_30d?.success_metric || "unknown"}\n`;
-
-        if ((c.supervisor_notes || []).length) {
-          text += `- 督導點評：\n`;
-          (c.supervisor_notes || []).slice(0,4).forEach(s => text += `  • ${s}\n`);
-        }
-      });
-
-      text += `\n----------------------------------------\n`;
-      text += `【督導三句話（可直接貼群組）】\n`;
-      if (msg3.length) msg3.forEach((m, i) => text += `${i+1}. ${m}\n`);
-      else text += `（無）\n`;
-
-      lastReport = text.trim();
-      document.getElementById('reportText').value = lastReport;
-      document.getElementById('reportTextModal').value = lastReport;
-    }
-
-    function copyReport() {
-      const t = document.getElementById('reportText').value || lastReport;
-      if (!t) { alert('尚未生成報告，請先按「生成報告」。'); return; }
-      copyTextToClipboard(t);
-      alert('已複製整份分析報告！');
-    }
-
-    function downloadReportTxt() {
-      const t = document.getElementById('reportText').value || lastReport;
-      if (!t) { alert('尚未生成報告，請先按「生成報告」。'); return; }
-      const blob = new Blob([t], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const now = new Date();
-      const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-      a.href = url;
-      a.download = `服務日誌分析報告_${stamp}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-
-    function toggleReportModal(show) {
-      const modal = document.getElementById('reportModal');
-      if (show) {
-        if (!lastReport) generateReport();
-        document.getElementById('reportTextModal').value = lastReport || '';
-        modal.classList.remove('hidden');
-      } else {
-        modal.classList.add('hidden');
-      }
-    }
-
-    function copyTextToClipboard(text) {
-      const el = document.createElement('textarea');
-      el.value = text || '';
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-    }
-
-    // ====== UI helpers ======
-    function chip(text, tone="slate") {
-      const map = {
-        slate: "bg-slate-100 text-slate-700",
-        blue: "bg-blue-100 text-blue-700",
-        purple: "bg-purple-100 text-purple-700",
-        red: "bg-red-100 text-red-700",
-        green: "bg-green-100 text-green-700",
-        amber: "bg-amber-100 text-amber-700"
-      };
-      return `<span class="chip px-2 py-1 rounded-full ${map[tone] || map.slate}">${escapeHtml(text)}</span>`;
-    }
-
-    function escapeHtml(str) {
-      if (str === null || str === undefined) return '';
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
-    function renderQuotes(quotes=[]) {
-      const q = (quotes || []).filter(Boolean).slice(0,3);
-      if (!q.length) return `<div class="text-xs text-slate-400">（無證據句）</div>`;
-      return `
-        <div class="mt-2 space-y-2">
-          ${q.map(x => `
-            <div class="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3">
-              <i class="fas fa-quote-left text-slate-300 mr-2"></i>${escapeHtml(x)}
-            </div>
-          `).join('')}
-        </div>
-      `;
-    }
-
-    function toolBadge(status) {
-      const s = (status || "unknown").toLowerCase();
-      if (s === "used") return chip("已使用", "green");
-      if (s === "not_used") return chip("未使用", "red");
-      return chip("不明", "slate");
-    }
-
-    function gradeBadge(g) {
-      const x = (g || "D").toUpperCase();
-      if (x === "A") return chip("A 高機率", "green");
-      if (x === "B") return chip("B 可追", "blue");
-      if (x === "C") return chip("C 需補強", "amber");
-      return chip("D 低優先", "slate");
-    }
-
-    function typeBadge(t) {
-      const m = {
-        subscription_buyout: ["訂閱轉買斷", "purple"],
-        first_trial: ["初次試聽", "blue"],
-        loan_trial: ["暫借驗證", "amber"],
-        post_delivery_followup: ["交貨後追蹤", "green"],
-        unknown: ["未辨識", "slate"]
-      };
-      const key = (t || "unknown");
-      const [label, tone] = m[key] || m.unknown;
-      return chip(label, tone);
-    }
-
-    // ====== Render ======
-    function renderResult(data) {
-      const container = document.getElementById('analysisResult');
-
-      const batch = data?.batch_summary || {};
-      const gaps = data?.common_gaps_top5 || [];
-      const cases = data?.cases || [];
-      const msg3 = data?.supervisor_group_message_3lines || [];
-
-      container.innerHTML = `
-        <!-- Batch stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div class="stat-card bg-white p-6 rounded-3xl shadow-lg border border-slate-100 text-center">
-            <div class="text-slate-400 text-[10px] font-black uppercase mb-1">整體強度</div>
-            <div class="text-2xl font-black text-slate-800">${escapeHtml(batch.overall_strength ?? "unknown")}</div>
-            <div class="text-xs text-slate-400 mt-1">0-100（越高越穩）</div>
-          </div>
-          <div class="stat-card bg-white p-6 rounded-3xl shadow-lg border border-slate-100 text-center">
-            <div class="text-slate-400 text-[10px] font-black uppercase mb-1">邀約力</div>
-            <div class="text-2xl font-black text-blue-600">${escapeHtml(batch.invite_strength ?? "unknown")}</div>
-            <div class="text-xs text-slate-400 mt-1">外撥→進店/下一步</div>
-          </div>
-          <div class="stat-card bg-white p-6 rounded-3xl shadow-lg border border-slate-100 text-center">
-            <div class="text-slate-400 text-[10px] font-black uppercase mb-1">成交力</div>
-            <div class="text-2xl font-black text-purple-600">${escapeHtml(batch.conversion_strength ?? "unknown")}</div>
-            <div class="text-xs text-slate-400 mt-1">試聽→承諾→收單</div>
-          </div>
-        </div>
-
-        <!-- Top risks / wins -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white p-6 rounded-3xl shadow-lg border border-slate-100">
-            <div class="flex items-center gap-2 mb-3">
-              <i class="fas fa-triangle-exclamation text-red-500"></i>
-              <h3 class="font-black text-slate-800">本批主要風險</h3>
-            </div>
-            <ul class="space-y-2">
-              ${(batch.top_risks || []).slice(0,6).map(x => `
-                <li class="text-sm text-slate-700 flex gap-2">
-                  <span class="text-red-400 font-black">•</span><span>${escapeHtml(x)}</span>
-                </li>
-              `).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
-            </ul>
-          </div>
-
-          <div class="bg-white p-6 rounded-3xl shadow-lg border border-slate-100">
-            <div class="flex items-center gap-2 mb-3">
-              <i class="fas fa-bolt text-green-500"></i>
-              <h3 class="font-black text-slate-800">本批做得好的地方</h3>
-            </div>
-            <ul class="space-y-2">
-              ${(batch.top_wins || []).slice(0,6).map(x => `
-                <li class="text-sm text-slate-700 flex gap-2">
-                  <span class="text-green-500 font-black">•</span><span>${escapeHtml(x)}</span>
-                </li>
-              `).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
-            </ul>
-          </div>
-        </div>
-
-        <!-- Common gaps -->
-        <div class="bg-white p-6 rounded-3xl shadow-lg border border-slate-100">
-          <div class="flex items-center gap-2 mb-4">
-            <i class="fas fa-magnifying-glass-chart text-blue-500"></i>
-            <h3 class="font-black text-slate-800">最常見服務缺口 Top 5（最容易漏單）</h3>
-          </div>
-
-          <div class="space-y-5">
-            ${gaps.slice(0,5).map((g, idx) => `
-              <div class="border border-slate-100 rounded-2xl p-5 bg-slate-50">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-xl bg-slate-900 text-white font-black flex items-center justify-center">${idx+1}</div>
-                    <div>
-                      <div class="font-black text-slate-800">${escapeHtml(g.gap || "unknown")}</div>
-                      <div class="text-xs text-slate-500 mt-1">${escapeHtml(g.why_it_loses_deals || "")}</div>
-                    </div>
-                  </div>
-                  ${chip("漏單點", "red")}
-                </div>
-
-                ${renderQuotes(g.evidence_quotes)}
-
-                <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div class="bg-white rounded-2xl border border-slate-100 p-4">
-                    <div class="text-[10px] uppercase font-black text-slate-400">修正動作</div>
-                    <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(g.fix_action || "unknown")}</div>
-                  </div>
-                  <div class="bg-slate-900 rounded-2xl p-4">
-                    <div class="text-[10px] uppercase font-black text-white/60">督導一句話（可直接講）</div>
-                    <div class="text-sm font-black text-white mt-1">"${escapeHtml(g.coach_script_one_liner || "unknown")}"</div>
-                  </div>
-                </div>
-              </div>
-            `).join('') || `<div class="text-sm text-slate-400">（無）</div>`}
-          </div>
-        </div>
-
-        <!-- Cases -->
-        <div class="bg-white p-6 rounded-3xl shadow-lg border border-slate-100">
-          <div class="flex items-center justify-between gap-4 mb-4">
-            <div class="flex items-center gap-2">
-              <i class="fas fa-users-gear text-purple-500"></i>
-              <h3 class="font-black text-slate-800">個案拆解（自動判讀）</h3>
-            </div>
-            <div class="text-xs text-slate-400">共 ${cases.length} 筆</div>
-          </div>
-
-          <div class="space-y-5">
-            ${cases.map((c, idx) => renderCaseCard(c, idx)).join('') || `
-              <div class="text-sm text-slate-400">（未辨識到清楚個案：建議日誌每筆用「【個案】」或「個案A/B」分段）</div>
-            `}
-          </div>
-        </div>
-
-        <!-- Supervisor 3 lines -->
-        <div class="bg-slate-900 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
-          <div class="flex justify-between items-center mb-6">
-            <h3 class="text-white font-black text-xl">督導三句話（可直接貼群組）</h3>
-            <button
-              onclick="copyTextToClipboard(${JSON.stringify((msg3 || []).join('\\n'))})"
-              class="btn bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full"
-            >
-              <i class="fas fa-copy mr-2"></i> 複製
-            </button>
-          </div>
-
-          <div class="space-y-3">
-            ${(msg3 || []).slice(0,3).map((line, i) => `
-              <div class="flex gap-4 items-start">
-                <span class="bg-blue-600 text-white w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0 mt-0.5">${i+1}</span>
-                <p class="text-slate-100 font-bold leading-relaxed">${escapeHtml(line)}</p>
-              </div>
-            `).join('') || `<div class="text-slate-300 text-sm">（無）</div>`}
-          </div>
-        </div>
-
-        <!-- Raw JSON toggle -->
-        <details class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
-          <summary class="cursor-pointer font-black text-slate-700 flex items-center gap-2">
-            <i class="fas fa-code text-slate-400"></i> 檢視原始 JSON（除錯用）
-          </summary>
-          <pre class="mt-4 p-4 rounded-2xl bg-slate-950 text-slate-100 text-xs overflow-auto mono">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
-        </details>
-      `;
-    }
-
-    function renderCaseCard(c, idx) {
-      const dm = c?.decision_maker || {};
-      const opp = c?.opportunity_grade || {};
-      const disc = c?.disc_profile || {};
-      const tools = c?.validation_tools || {};
-      const barriers = c?.barriers || [];
-      const plan = c?.followup_plan || {};
-      const title = c?.case_id || `Case ${idx+1}`;
-
-      return `
-        <div class="border border-slate-100 rounded-3xl p-6 bg-slate-50">
-          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-            <div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="text-lg font-black text-slate-900">${escapeHtml(title)}</div>
-                ${typeBadge(c?.case_type)}
-                ${c?.subscription_status ? chip(c.subscription_status === "subscribed" ? "已訂閱" : c.subscription_status === "not_subscribed" ? "未訂閱" : "訂閱狀態不明",
-                    c.subscription_status === "subscribed" ? "purple" : c.subscription_status === "not_subscribed" ? "blue" : "slate") : chip("訂閱狀態不明","slate")}
-                ${c?.stage ? chip(escapeHtml(c.stage), "slate") : ''}
-                ${gradeBadge(opp.grade)}
-              </div>
-
-              <div class="text-xs text-slate-500 mt-2">
-                <span class="font-black">商機理由：</span>${escapeHtml(opp.reasoning || "unknown")}
-              </div>
-
-              ${renderQuotes(opp.evidence_quotes)}
-            </div>
-
-            <div class="bg-white rounded-2xl border border-slate-100 p-4 md:w-[320px]">
-              <div class="text-[10px] uppercase font-black text-slate-400">下一步最優先</div>
-              <div class="text-sm font-black text-slate-800 mt-1">${escapeHtml(opp.next_best_step || "unknown")}</div>
-            </div>
-          </div>
-
-          <div class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="bg-white rounded-2xl border border-slate-100 p-5">
-              <div class="flex items-center justify-between gap-3">
-                <div class="font-black text-slate-800 flex items-center gap-2">
-                  <i class="fas fa-user-check text-blue-500"></i> 決策者狀況
-                </div>
-                ${chip(dm.present === "yes" ? "在場" : dm.present === "no" ? "不在場" : "不明", dm.present === "no" ? "red" : dm.present === "yes" ? "green" : "slate")}
-              </div>
-              <div class="text-sm text-slate-700 mt-2">
-                <span class="font-black">誰：</span>${escapeHtml(dm.who || "unknown")}
-              </div>
-              <div class="text-sm text-slate-700 mt-1">
-                <span class="font-black">風險：</span>${escapeHtml(dm.risk_note || "unknown")}
-              </div>
-              ${renderQuotes(dm.evidence_quotes)}
-            </div>
-
-            <div class="bg-white rounded-2xl border border-slate-100 p-5">
-              <div class="font-black text-slate-800 flex items-center gap-2">
-                <i class="fas fa-ban text-red-500"></i> 主要卡關
-              </div>
-              <div class="mt-3 space-y-3">
-                ${barriers.slice(0,4).map(b => `
-                  <div class="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div class="flex items-center gap-2 mb-1">
-                      ${chip(b.type || "未知", "red")}
-                      <div class="text-xs text-slate-500">${escapeHtml(b.note || "")}</div>
-                    </div>
-                    ${(b.evidence_quotes && b.evidence_quotes.length) ? renderQuotes(b.evidence_quotes) : ''}
-                  </div>
-                `).join('') || `<div class="text-sm text-slate-400">（無）</div>`}
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="font-black text-slate-800 flex items-center gap-2">
-                <i class="fas fa-brain text-purple-500"></i> DISC 判讀與應對
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                ${chip(`用戶：${disc.user_disc || "unknown"}`, "purple")}
-                ${chip(`照護者：${disc.caregiver_disc || "unknown"}`, "purple")}
-              </div>
-            </div>
-            <div class="text-xs text-slate-500 mt-2">
-              <span class="font-black">推測依據：</span>${escapeHtml(disc.inference_basis || "unknown")}
-            </div>
-
-            <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-                <div class="text-[10px] uppercase font-black text-slate-400">你要做（Do）</div>
-                <ul class="mt-2 space-y-1">
-                  ${(disc.do || []).slice(0,4).map(x => `<li class="text-sm text-slate-700">• ${escapeHtml(x)}</li>`).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
-                </ul>
-              </div>
-              <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-                <div class="text-[10px] uppercase font-black text-slate-400">你不要做（Don't）</div>
-                <ul class="mt-2 space-y-1">
-                  ${(disc.dont || []).slice(0,3).map(x => `<li class="text-sm text-slate-700">• ${escapeHtml(x)}</li>`).join('') || `<li class="text-sm text-slate-400">（無）</li>`}
-                </ul>
-              </div>
-            </div>
-
-            <div class="mt-3 bg-slate-900 rounded-2xl p-4">
-              <div class="text-[10px] uppercase font-black text-white/60">可直接用的話術</div>
-              <div class="text-sm font-black text-white mt-1">"${escapeHtml(disc.script || "unknown")}"</div>
-            </div>
-
-            ${renderQuotes(disc.evidence_quotes)}
-          </div>
-
-          <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
-            <div class="font-black text-slate-800 flex items-center gap-2 mb-3">
-              <i class="fas fa-microscope text-blue-500"></i> 專業驗證工具檢核
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              ${renderToolCard("REM（實耳測量）", tools?.rem)}
-              ${renderToolCard("字詞表/語音測試", tools?.speech_test)}
-              ${renderToolCard("情境驗證", tools?.situational_validation)}
-            </div>
-          </div>
-
-          <div class="mt-5 bg-white rounded-2xl border border-slate-100 p-5">
-            <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-              <div class="font-black text-slate-800 flex items-center gap-2">
-                <i class="fas fa-route text-green-500"></i> 後續追蹤具體計畫
-              </div>
-              <button
-                onclick="copyTextToClipboard(${JSON.stringify(buildCaseFollowupText(title, plan))})"
-                class="btn bg-slate-900 hover:bg-slate-800 text-white text-xs px-4 py-2 rounded-full"
-              >
-                <i class="fas fa-copy mr-2"></i> 複製追蹤計畫
-              </button>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              ${renderPlanCard("72 小時內", plan?.within_72h)}
-              ${renderPlanCard("7 天內", plan?.within_7d)}
-              ${renderPlanCard("30 天內", plan?.within_30d)}
-            </div>
-          </div>
-
-          <div class="mt-5 bg-slate-900 rounded-2xl p-5">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="font-black text-white flex items-center gap-2">
-                <i class="fas fa-dumbbell text-white/70"></i> 督導點評（可直接回饋）
-              </div>
-              <button
-                onclick="copyTextToClipboard(${JSON.stringify((c?.supervisor_notes || []).join('\\n'))})"
-                class="btn bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-full"
-              >
-                <i class="fas fa-copy mr-2"></i> 複製
-              </button>
-            </div>
-
-            <div class="mt-3 space-y-2">
-              ${(c?.supervisor_notes || []).slice(0,4).map((x, i) => `
-                <div class="flex gap-3 items-start">
-                  <span class="bg-blue-600 text-white w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0 mt-0.5">${i+1}</span>
-                  <div class="text-slate-100 text-sm font-bold">${escapeHtml(x)}</div>
-                </div>
-              `).join('') || `<div class="text-slate-300 text-sm">（無）</div>`}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    function renderToolCard(title, obj) {
-      const status = obj?.status || "unknown";
-      const note = obj?.note || "";
-      const next = obj?.next_action || "unknown";
-      return `
-        <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-          <div class="flex items-center justify-between gap-3">
-            <div class="text-sm font-black text-slate-800">${escapeHtml(title)}</div>
-            ${toolBadge(status)}
-          </div>
-          <div class="text-xs text-slate-500 mt-2">${escapeHtml(note)}</div>
-          <div class="mt-3 bg-white border border-slate-100 rounded-xl p-3">
-            <div class="text-[10px] uppercase font-black text-slate-400">下一步</div>
-            <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(next)}</div>
-          </div>
-        </div>
-      `;
-    }
-
-    function renderPlanCard(title, obj) {
-      const action = obj?.action || "unknown";
-      const target = obj?.target || "unknown";
-      const purpose = obj?.purpose || "unknown";
-      const metric = obj?.success_metric || "unknown";
-      return `
-        <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-          <div class="font-black text-slate-800">${escapeHtml(title)}</div>
-          <div class="mt-3 space-y-2">
-            <div class="bg-white border border-slate-100 rounded-xl p-3">
-              <div class="text-[10px] uppercase font-black text-slate-400">行動</div>
-              <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(action)}</div>
-            </div>
-            <div class="bg-white border border-slate-100 rounded-xl p-3">
-              <div class="text-[10px] uppercase font-black text-slate-400">對象</div>
-              <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(target)}</div>
-            </div>
-            <div class="bg-white border border-slate-100 rounded-xl p-3">
-              <div class="text-[10px] uppercase font-black text-slate-400">目的</div>
-              <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(purpose)}</div>
-            </div>
-            <div class="bg-white border border-slate-100 rounded-xl p-3">
-              <div class="text-[10px] uppercase font-black text-slate-400">成功指標</div>
-              <div class="text-sm font-bold text-slate-700 mt-1">${escapeHtml(metric)}</div>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    function buildCaseFollowupText(caseId, plan) {
-      const a = plan?.within_72h || {};
-      const b = plan?.within_7d || {};
-      const c = plan?.within_30d || {};
-      return [
-        `【${caseId}｜追蹤計畫】`,
-        `72小時內｜行動：${a.action || "unknown"}｜對象：${a.target || "unknown"}｜目的：${a.purpose || "unknown"}｜指標：${a.success_metric || "unknown"}`,
-        `7天內｜行動：${b.action || "unknown"}｜對象：${b.target || "unknown"}｜目的：${b.purpose || "unknown"}｜指標：${b.success_metric || "unknown"}`,
-        `30天內｜行動：${c.action || "unknown"}｜對象：${c.target || "unknown"}｜目的：${c.purpose || "unknown"}｜指標：${c.success_metric || "unknown"}`
-      ].join('\n');
-    }
-
-    // ====== Utility ======
-    function copyTextToClipboard(text) {
-      const el = document.createElement('textarea');
-      el.value = text || '';
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      alert('已複製到剪貼簿！');
-    }
-  </script>
-</body>
-</html>
+async function downloadReportPdf() {
+  if (!lastResult) {
+    alert("尚未完成分析，請先執行「一鍵判讀」。");
+    return;
+  }
+
+  // 1) 準備 PDF 內容
+  const pdfContent = document.getElementById("pdfContent");
+  pdfContent.innerHTML = buildPdfTemplate(lastResult);
+
+  // 2) 追加 PDF 專用 CSS（避免卡片被切半）
+  const style = document.createElement("style");
+  style.innerHTML = `
+    .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+    .page-break { page-break-before: always; break-before: page; }
+  `;
+  pdfContent.prepend(style);
+
+  // 3) 下載
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+
+  const element = document.getElementById("pdfRoot");
+
+  const opt = {
+    margin:       10,                 // mm
+    filename:     `服務日誌分析報告_${stamp}.pdf`,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak:    { mode: ['css', 'legacy'] }
+  };
+
+  await html2pdf().set(opt).from(element).save();
+}
